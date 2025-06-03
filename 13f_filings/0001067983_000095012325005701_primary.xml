@@ -1,0 +1,326 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html xmlns:n2="http://www.sec.gov/edgar/document/thirteenf/informationtable" xmlns:n1="http://www.sec.gov/edgar/thirteenffiler" xmlns:ns1="http://www.sec.gov/edgar/common" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>SEC FORM 13F-HR</title>
+<style type="text/css">
+              .FormData {color: blue; background-color: white; font-size: small; font-family: Times, serif;}
+              .FormDataC {color: blue; background-color: white; font-size: small; font-family: Times, serif; text-align: center;}
+              .FormDataR {color: blue; background-color: white; font-size: small; font-family: Times, serif; text-align: right;}
+              .SmallFormData {color: blue; background-color: white; font-size: x-small; font-family: Times, serif;}
+              .FootnoteData {color: green; background-color: white; font-size: x-small; font-family: Times, serif;}
+              .FormNumText {font-size: small; font-weight: bold; font-family: arial, helvetica, sans-serif;}
+              .FormAttention {font-size: medium; font-weight: bold; font-family: helvetica;}
+              .FormText {font-size: small; font-weight: normal; font-family: arial, helvetica, sans-serif; text-align: left;}
+              .FormTextR {font-size: small; font-weight: normal; font-family: arial, helvetica, sans-serif; text-align: right;}
+              .FormTextC {font-size: small; font-weight: normal; font-family: arial, helvetica, sans-serif; text-align: center;}
+              .FormEMText {font-size: medium; font-style: italic; font-weight: normal; font-family: arial, helvetica, sans-serif;}
+              .FormULText {font-size: medium; text-decoration: underline; font-weight: normal; font-family: arial, helvetica, sans-serif;}
+              .SmallFormText {font-size: xx-small; font-family: arial, helvetica, sans-serif; text-align: left;}
+              .SmallFormTextR {font-size: xx-small; font-family: arial, helvetica, sans-serif; text-align: right;}
+              .SmallFormTextC {font-size: xx-small; font-family: arial, helvetica, sans-serif; text-align: center;}
+              .MedSmallFormText {font-size: x-small; font-family: arial, helvetica, sans-serif; text-align: left;}
+              .FormTitle {font-size: medium; font-family: arial, helvetica, sans-serif; font-weight: bold;}
+              .FormTitle1 {font-size: small; font-family: arial, helvetica, sans-serif; font-weight: bold; border-top: black thick solid;}
+              .FormTitle2 {font-size: small; font-family: arial, helvetica, sans-serif; font-weight: bold;}
+              .FormTitle3 {font-size: small; font-family: arial, helvetica, sans-serif; font-weight: bold; padding-top: 2em; padding-bottom: 1em;}
+              .SectionTitle {font-size: small; text-align: left; font-family: arial, helvetica, sans-serif; 
+              		font-weight: bold; border-top: gray thin solid; border-bottom: gray thin solid;}
+              .FormName {font-size: large; font-family: arial, helvetica, sans-serif; font-weight: bold;}
+              .CheckBox {text-align: center; width: 5px; cell-spacing: 0; padding: 0 3 0 3; border-width: thin; border-style: solid;  border-color: black:}
+              body {background: white;}
+      </style>
+</head>
+<body>
+<table width="100%" border="0" cellspacing="0" cellpadding="4" summary="Form 13F-HR Header Information">
+<tr><td colspan="4" style="border: solid;text-align: center;"><p>The Securities and Exchange Commission has not necessarily reviewed the information in this filing and has not determined if it is accurate and complete.<br>The reader should not assume that the information is accurate and complete.</p></td></tr>
+<tr>
+<td width="10%" colspan="2" valign="top" align="left"></td>
+<td rowspan="1" width="70%" valign="middle" align="center">
+<span class="FormTitle">UNITED STATES SECURITIES AND EXCHANGE COMMISSION</span><br><span class="FormText">Washington, D.C. 20549</span><br><span class="FormTitle">FORM 13F</span><br><br><span class="FormTitle">FORM 13F COVER PAGE</span><br><br>
+</td>
+<td rowspan="1" width="20%" valign="top" align="center"><table width="100%" border="1" summary="OMB Approval Status Box">
+<tr><td class="FormTextC">OMB APPROVAL</td></tr>
+<tr><td><table width="100%" border="0" summary="OMB Interior Box">
+<tr>
+<td class="SmallFormText" colspan="3">OMB Number:</td>
+<td class="SmallFormTextR">3235-0006</td>
+</tr>
+<tr><td class="SmallFormText" colspan="4">Estimated average burden</td></tr>
+<tr>
+<td class="SmallFormText" colspan="3">hours per response:</td>
+<td class="SmallFormTextR">23.8</td>
+</tr>
+</table></td></tr>
+</table></td>
+</tr>
+</table>
+<hr>
+<table border="0" summary="Calendar Year or Quarter End"><tbody><tr>
+<td class="FormText">Report for the Calendar Year or Quarter Ended:</td>
+<td class="FormDataR">03-31-2025</td>
+</tr></tbody></table>
+<table border="0" summary="Amendment Information"><tbody>
+<tr>
+<td class="FormText">Check here if Amendment</td>
+<td class="CheckBox">  </td>
+<td class="FormText">Amendment Number:</td>
+</tr>
+<tr>
+<td class="FormText">This Amendment (Check only one.):</td>
+<td class="CheckBox">  </td>
+<td class="FormText">is a restatement.</td>
+</tr>
+<tr>
+<td></td>
+<td class="CheckBox">  </td>
+<td class="FormText">adds new holdings entries.</td>
+</tr>
+</tbody></table>
+<table border="0" summary="Filing Manager Information" width="50%"><tbody>
+<tr><td colspan="2" class="FormTitle3">Institutional Investment Manager Filing this Report:</td></tr>
+<tr>
+<td width="30%" class="FormText">Name:</td>
+<td class="FormData">Berkshire Hathaway Inc</td>
+</tr>
+<tr>
+<td width="30%" class="FormText">Address:</td>
+<td class="FormData">3555 Farnam Street</td>
+</tr>
+<tr><td></td></tr>
+<tr>
+<td></td>
+<td>
+<span class="FormData">Omaha</span>, 
+               <span class="FormData">NE</span> 
+               <span class="FormData">68131</span>
+</td>
+</tr>
+<tr>
+<td width="50%" class="FormText">Form 13F File Number:</td>
+<td class="FormData">028-04545</td>
+</tr>
+<tr><td width="50%" class="FormText">CRD Number (if applicable):</td></tr>
+<tr><td width="50%" class="FormText">SEC File Number (if applicable):</td></tr>
+</tbody></table>
+<p class="FormTitle3">The institutional investment manager filing this report and the person by whom it is signed hereby represent that the person signing the report is authorized to submit it, that all information contained herein is true, correct and complete, and that it is understood that all required items, statements, schedules, lists, and tables, are considered integral parts of this form.</p>
+<table width="50%" border="0" summary="Signature Block Information"><tbody>
+<tr><td colspan="5" class="FormText">Person Signing this Report on Behalf of Reporting Manager:</td></tr>
+<tr>
+<td width="30%" colspan="2" class="FormText">Name:</td>
+<td colspan="3"><span class="FormData">Marc D. Hamburg</span></td>
+</tr>
+<tr>
+<td class="FormText" colspan="2">Title:</td>
+<td colspan="3"><span class="FormData">Senior Vice President</span></td>
+</tr>
+<tr>
+<td class="FormText" colspan="2">Phone:</td>
+<td colspan="3"><span class="FormData">402-346-1400</span></td>
+</tr>
+<tr><td colspan="5" class="FormTitle3">Signature, Place, and Date of Signing:</td></tr>
+<tr>
+<td width="50%" colspan="3" class="FormData"><span class="FormData">Marc D. Hamburg</span></td>
+<td class="FormData">
+<span class="FormData">Omaha</span>, 
+                  <span class="FormData">NE</span>
+</td>
+<td class="FormData">05-15-2025</td>
+</tr>
+<tr>
+<td colspan="3" class="FormTextC" align="center">[Signature]</td>
+<td class="FormTextC" align="center">[City, State]</td>
+<td class="FormTextC" align="center">[Date]</td>
+</tr>
+<tr><td colspan="5" style="padding-top: 2em;"></td></tr>
+</tbody></table>
+<table border="0" summary="Report Type Information"><tbody>
+<tr><td colspan="2" class="FormTitle3">Report Type (Check only one.):</td></tr>
+<tr>
+<td class="CheckBox"><span class="FormData">X</span></td>
+<td class="FormText">13F HOLDINGS REPORT. (Check here if all holdings of this reporting manager are reported in this report.)</td>
+</tr>
+<tr>
+<td class="CheckBox">  </td>
+<td class="FormText">13F NOTICE. (Check here if no holdings reported are in this report, and all holdings are reported by other reporting manager(s).)</td>
+</tr>
+<tr>
+<td class="CheckBox">  </td>
+<td class="FormText">13F COMBINATION REPORT. (Check here if a portion of the holdings for this reporting manager are reported in this report and a portion are reported by other reporting manager(s).)</td>
+</tr>
+</tbody></table>
+<table width="100%" border="0" summary="Report Summary Information"><tbody>
+<tr><td colspan="6" align="center" class="FormTitle">Form 13F Summary Page</td></tr>
+<tr>
+<td width="1%"></td>
+<td colspan="5" class="FormTitle3">Report Summary:</td>
+</tr>
+<tr>
+<td></td>
+<td width="30%" colspan="2" class="FormText">Number of Other Included Managers:</td>
+<td width="10%" align="right"><span class="FormData">14</span></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td></td>
+<td colspan="2" class="FormText">Form 13F Information Table Entry Total:</td>
+<td align="right"><span class="FormData">110</span></td>
+</tr>
+<tr>
+<td></td>
+<td colspan="2" class="FormText">Form 13F Information Table Value Total:</td>
+<td align="right"><span class="FormData">258,701,144,516</span></td>
+</tr>
+<tr>
+<td colspan="3"></td>
+<td class="FormTextC">(round to nearest dollar)</td>
+</tr>
+<tr><div class="FormData">Confidential Treatment Requested. (The Manager has omitted from this public Form 13F one or more holding(s) for which it is requesting confidential treatment from the U.S. Securities and Exchange Commission pursuant to section 13(f) of the Exchange Act and rule 24b-2 thereunder)</div></tr>
+</tbody></table>
+<table width="100%" border="0" summary="Report Summary Other Included Managers"><tbody>
+<tr><td width="100%" colspan="4" class="FormTitle3">List of Other Included Managers:</td></tr>
+<tr><td colspan="4" class="FormText">Provide a numbered list of the name(s) and Form 13F file number(s) 
+               of all institutional investment managers with respect to which this report is filed, other than the 
+               manager filing this report.</td></tr>
+<tr><td colspan="4" class="FormText">[If there are no entries in this list, state “NONE” and omit the 
+               column headings and list entries.]</td></tr>
+<tr>
+<td width="2%"></td>
+<td width="5%" class="FormText">No.</td>
+<td width="10%" class="FormText">Name</td>
+<td width="10%" class="FormText">Form 13F File No.</td>
+<td width="10%" class="FormText">CRD No. (if applicable)</td>
+<td width="10%" class="FormText">SEC File No. (if applicable)</td>
+<td width="10%" class="FormText">CIK</td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">1</td>
+<td class="FormData">Berkshire Hathaway Homestate Insurance Co.</td>
+<td class="FormData">28-2226</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">2</td>
+<td class="FormData">Berkshire Hathaway Life Insurance Co of Nebraska</td>
+<td class="FormData">28-5678</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">3</td>
+<td class="FormData">BH Finance LLC</td>
+<td class="FormData">28-14389</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">4</td>
+<td class="FormData">Buffett Warren E</td>
+<td class="FormData">28-554</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">5</td>
+<td class="FormData">Columbia Insurance Co</td>
+<td class="FormData">28-1517</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">6</td>
+<td class="FormData">Cypress Insurance Co</td>
+<td class="FormData">28-06102</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">7</td>
+<td class="FormData">General Re Corp</td>
+<td class="FormData">28-04922</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">8</td>
+<td class="FormData">GEICO Corp</td>
+<td class="FormData">28-852</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">9</td>
+<td class="FormData">Medical Protective Corp</td>
+<td class="FormData">28-12941</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">10</td>
+<td class="FormData">National Fire &amp; Marine Insurance Co</td>
+<td class="FormData">28-1066</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">11</td>
+<td class="FormData">National Indemnity Co</td>
+<td class="FormData">28-718</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">12</td>
+<td class="FormData">National Liability &amp; Fire Insurance Co</td>
+<td class="FormData">28-5006</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">13</td>
+<td class="FormData">Nebraska Furniture Mart</td>
+<td class="FormData">28-11222</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+<tr>
+<td></td>
+<td class="FormData">14</td>
+<td class="FormData">U.S. Investment Corp</td>
+<td class="FormData">28-12947</td>
+<td> </td>
+<td> </td>
+<td> </td>
+</tr>
+</tbody></table>
+<hr>
+</body>
+</html>
