@@ -36,17 +36,23 @@ def parse_xml_infotable_content(filepath, filer_cik, reporting_date_to_assign):
     """
     holdings = []
     try:
+        print(f"DEBUG: Parsing XML infotable: {filepath}")
         tree = ET.parse(filepath)
         root = tree.getroot()
+        print(f"DEBUG: XML root tag: {root.tag}")
 
         # Dynamically get the namespace from the root element
         root_tag_match = re.match(r'(\{.*\})(.*)', root.tag)
         ns_uri = ""
         if root_tag_match and root_tag_match.group(1):
             ns_uri = root_tag_match.group(1).strip('{}')
+        print(f"DEBUG: Detected namespace URI: '{ns_uri}'")
 
-        # Define paths using the namespace if it exists
-        infotable_tag = f"{{{ns_uri}}}infoTable" if ns_uri else "infoTable"
+        # Define tags based on whether namespace is present
+        # For the provided simulated XMLs, the root is <informationTable> and repeating holding item is <infoTable>
+        holding_entry_tag = f"{{{ns_uri}}}infoTable" if ns_uri else "infoTable" # Changed from infoTableEntry
+        print(f"DEBUG: Expecting holding entry tag: '{holding_entry_tag}'")
+
         nameofissuer_tag = f"{{{ns_uri}}}nameOfIssuer" if ns_uri else "nameOfIssuer"
         cusip_tag = f"{{{ns_uri}}}cusip" if ns_uri else "cusip"
         value_tag = f"{{{ns_uri}}}value" if ns_uri else "value"
@@ -54,13 +60,15 @@ def parse_xml_infotable_content(filepath, filer_cik, reporting_date_to_assign):
         sshprnamt_tag = f"{{{ns_uri}}}sshPrnamt" if ns_uri else "sshPrnamt"
         sshprnamttype_tag = f"{{{ns_uri}}}sshPrnamtType" if ns_uri else "sshPrnamtType"
 
-        for holding_node in root.findall(infotable_tag): # Each 'infoTable' is a holding
+        # The root of the simulated file is <infoTable>, children are <infoTableEntry>
+        for holding_node in root.findall(holding_entry_tag):
             try:
                 name_of_issuer_node = holding_node.find(nameofissuer_tag)
                 name_of_issuer = name_of_issuer_node.text if name_of_issuer_node is not None else None
 
                 cusip_node = holding_node.find(cusip_tag)
-                cusip = cusip_node.text if cusip_node is not None else None
+                cusip_raw = cusip_node.text if cusip_node is not None else None
+                cusip = cusip_raw.strip().zfill(9) if cusip_raw else None # Standardize CUSIP to 9 chars, zero-padded
 
                 value_node = holding_node.find(value_tag)
                 value_str = value_node.text if value_node is not None else None
@@ -75,9 +83,8 @@ def parse_xml_infotable_content(filepath, filer_cik, reporting_date_to_assign):
                     sshprnamttype_node = shrs_or_prn_amt_node.find(sshprnamttype_tag)
                     security_type = sshprnamttype_node.text if sshprnamttype_node is not None else None
 
-                # Value in form13fInfoTable.xml is actual value, not in thousands.
-                # The header of a 13F filing states "VALUE (x$1000)" but entries in infotable.xml are full values.
-                value_usd = int(value_str) if value_str and value_str.isdigit() else None
+                # The simulated XML files have <value> reported in thousands.
+                value_usd = int(value_str) * 1000 if value_str and value_str.isdigit() else None
                 quantity = int(quantity_str) if quantity_str and quantity_str.isdigit() else None
 
                 if not all([name_of_issuer, cusip, value_usd is not None, quantity is not None]):
@@ -111,7 +118,7 @@ def parse_primary_document_for_date(primary_doc_path):
     Parses the primary filing document (XML or TXT) to find the reporting date.
     Returns the date as a string (YYYY-MM-DD) or None if not found.
     """
-    # print(f"DEBUG: parse_primary_document_for_date called for {primary_doc_path}")
+    print(f"DEBUG: Attempting to parse date from primary_doc: {primary_doc_path}")
     date_str = None
     try:
         with open(primary_doc_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -124,43 +131,68 @@ def parse_primary_document_for_date(primary_doc_path):
         # Strategy 1: Find "Report for the Calendar Year or Quarter Ended:"
         # Example: <td class="FormText">Report for the Calendar Year or Quarter Ended:</td>
         #          <td class="FormDataR">03-31-2025</td>
-        form_text_elements = soup.find_all('td', class_='FormText')
-        for el in form_text_elements:
-            if "Report for the Calendar Year or Quarter Ended:" in el.get_text(strip=True):
-                next_td = el.find_next_sibling('td', class_='FormDataR')
-                if next_td:
-                    date_str = next_td.get_text(strip=True)
+
+        # Try finding by specific text in <p> tags for the simulated files
+        found_p_tag_date = None
+        for p_tag in soup.find_all('p'):
+            text = p_tag.get_text(strip=True)
+            if "Report for the Calendar Year or Quarter Ended:" in text:
+                date_str_candidate = text.split("Report for the Calendar Year or Quarter Ended:")[1].strip()
+                if date_str_candidate:
+                    found_p_tag_date = date_str_candidate
                     break
 
+        if found_p_tag_date:
+            date_str = found_p_tag_date
+        else: # Fallback to original td logic if p-tag logic fails
+            form_text_elements = soup.find_all('td', class_='FormText')
+            for el in form_text_elements:
+                if "Report for the Calendar Year or Quarter Ended:" in el.get_text(strip=True):
+                    next_td = el.find_next_sibling('td', class_='FormDataR')
+                    if next_td:
+                        date_str = next_td.get_text(strip=True)
+                        break
+
+        print(f"DEBUG: Extracted date_str (Report for Quarter Ended): '{date_str}'")
         if date_str:
             try:
-                # Assuming M-D-YYYY format from the example
-                dt_obj = pd.to_datetime(date_str, format='%m-%d-%Y', errors='raise')
-                return dt_obj.strftime('%Y-%m-%d')
+                # Handles MM-DD-YYYY or YYYY-MM-DD if pandas can infer it
+                dt_obj = pd.to_datetime(date_str, errors='raise')
+                parsed_date = dt_obj.strftime('%Y-%m-%d')
+                print(f"DEBUG: Parsed date to: '{parsed_date}'")
+                return parsed_date
             except ValueError:
                 print(f"  Could not parse date string '{date_str}' from (Calendar Year/Quarter) {primary_doc_path}.")
                 date_str = None # Reset if parsing failed
 
         # Strategy 2: Fallback to Signature Date (less ideal as it's filing date, not period end)
-        # Example: <td class="FormData">05-15-2025</td> ... <td class="FormTextC" align="center">[Date]</td>
         if not date_str:
-            form_data_elements = soup.find_all('td', class_='FormData')
-            for el in form_data_elements:
-                # Check if this td contains a date and is likely a signature date
-                # by looking for a nearby cell with "[Date]"
-                parent_row = el.find_parent('tr')
-                if parent_row:
-                    date_label_cell = parent_row.find('td', string=lambda t: t and "[Date]" in t)
-                    if date_label_cell:
-                        # Assuming the date is in the FormData cell within the same row structure
-                        # This heuristic might need refinement
-                        potential_date = el.get_text(strip=True)
-                        if re.match(r"^\d{1,2}-\d{1,2}-\d{4}$", potential_date):
-                            date_str = potential_date
-                            break
+            print("DEBUG: 'Report for Quarter Ended' date not found or failed to parse. Trying Signature Date.")
+            # Try finding by specific text in <p> tags for signature date
+            found_p_sig_date = None
+            for p_tag in soup.find_all('p'):
+                text = p_tag.get_text(strip=True)
+                if "Signature Date:" in text:
+                    date_str_candidate = text.split("Signature Date:")[1].strip()
+                    if date_str_candidate:
+                        found_p_sig_date = date_str_candidate
+                        break
+            if found_p_sig_date:
+                 date_str = found_p_sig_date
+            else: # Fallback to td logic for signature date
+                form_data_elements = soup.find_all('td', class_='FormData')
+                for el in form_data_elements:
+                    parent_row = el.find_parent('tr')
+                    if parent_row:
+                        date_label_cell = parent_row.find('td', string=lambda t: t and "[Date]" in t)
+                        if date_label_cell:
+                            potential_date = el.get_text(strip=True)
+                            if re.match(r"^\d{1,2}-\d{1,2}-\d{4}$", potential_date):
+                                date_str = potential_date
+                                break
             if date_str:
                 try:
-                    dt_obj = pd.to_datetime(date_str, format='%m-%d-%Y', errors='raise')
+                    dt_obj = pd.to_datetime(date_str, errors='raise') # Handles MM-DD-YYYY
                     print(f"  Using signature date as fallback: {date_str} from {primary_doc_path}")
                     return dt_obj.strftime('%Y-%m-%d')
                 except ValueError:

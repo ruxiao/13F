@@ -44,8 +44,8 @@ def main():
         return
 
     try:
-        # Read the consolidated holdings data, ensuring filer_cik and reporting_date are read as string
-        holdings_df = pd.read_csv(INPUT_CSV, dtype={'filer_cik': str, 'reporting_date': str})
+        # Read the consolidated holdings data, ensuring relevant columns are read as string
+        holdings_df = pd.read_csv(INPUT_CSV, dtype={'filer_cik': str, 'reporting_date': str, 'cusip': str})
         print(f"Read {len(holdings_df)} records from {INPUT_CSV}")
     except pd.errors.EmptyDataError:
         print(f"Error: Input CSV file {INPUT_CSV} is empty.")

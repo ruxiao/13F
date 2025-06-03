@@ -33,7 +33,7 @@ def main():
         return
 
     try:
-        holdings_df = pd.read_csv(INPUT_CSV)
+        holdings_df = pd.read_csv(INPUT_CSV, dtype={'cusip': str, 'filer_cik': str, 'reporting_date': str})
         if holdings_df.empty:
             print(f"Input file {INPUT_CSV} is empty. No sentiment signals to generate.")
             # Create an empty output file with headers if it's empty

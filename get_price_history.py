@@ -30,7 +30,7 @@ def get_cusips_and_date_range(filepath):
         return [], None, None
 
     try:
-        df = pd.read_csv(filepath)
+        df = pd.read_csv(filepath, dtype={'cusip': str}) # Ensure CUSIP is read as string
         if df.empty:
             print(f"Sentiment signals file {filepath} is empty.")
             return [], None, None
@@ -82,10 +82,12 @@ def map_cusip_to_ticker(cusip):
     # Manual mapping for a few known CUSIPs from the sample data
     cusip_to_ticker_map = {
         "037833100": "AAPL",        # Apple Inc.
-        "023135106": "AMZN",        # Amazon.com Inc.
-        "060505104": "BAC",        # Bank of America Corp
-        "191216100": "KO",         # Coca-Cola Co
-        "166764100": "CVX",        # Chevron Corp
+        "023135106": "AMZN",        # Amazon.com Inc. (will not be in current signals)
+        "594918104": "MSFT",        # Microsoft Corp (present in one of the simulated info tables, but not in all periods)
+        "060505104": "BAC",         # Bank of America Corp
+        "025816109": "AXP",         # American Express Co
+        "191216100": "KO",          # Coca-Cola Co (will not be in current signals)
+        "166764100": "CVX",         # Chevron Corp (will not be in current signals)
         # Add more if other CUSIPs from sentiment_signals.csv are easily identifiable
     }
 

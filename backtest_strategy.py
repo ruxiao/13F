@@ -15,8 +15,8 @@ INITIAL_CAPITAL = 100000.0
 # Sell (exit position) if sentiment score < SELL_THRESHOLD (or if it simply drops)
 # For this version, we'll hold until the next signal for that stock, or until end of backtest.
 # A more advanced strategy would have explicit sell signals or stop-losses.
-BUY_THRESHOLD = 0.0 # Buy if score is >= 0.0 (to include current neutral scores)
-SELL_THRESHOLD = -0.5 # Sell if score is significantly negative
+BUY_THRESHOLD = 0.07
+SELL_THRESHOLD = -0.02
 
 # Lag for signal activation (e.g., 1 day after reporting_date, or more realistically 15-45 days after quarter end)
 # For 13F, reporting_date is the end of the quarter. Filings are due 45 days later.
@@ -39,11 +39,13 @@ def map_cusip_to_ticker(cusip):
     (Reusing the simple manual map from get_price_history.py)
     """
     cusip_to_ticker_map = {
-        "037833100": "AAPL",
-        "023135106": "AMZN",
-        "060505104": "BAC",
-        "191216100": "KO",
-        "166764100": "CVX",
+        "037833100": "AAPL",        # Apple Inc.
+        "023135106": "AMZN",        # Amazon.com Inc.
+        "594918104": "MSFT",        # Microsoft Corp
+        "060505104": "BAC",         # Bank of America Corp
+        "025816109": "AXP",         # American Express Co
+        "191216100": "KO",          # Coca-Cola Co
+        "166764100": "CVX",         # Chevron Corp
     }
     if cusip in cusip_to_ticker_map:
         return cusip_to_ticker_map[cusip]
@@ -122,7 +124,7 @@ def main():
         print(f"Error: Sentiment signals file not found: {SENTIMENT_SIGNALS_CSV}")
         return
     try:
-        signals_df = pd.read_csv(SENTIMENT_SIGNALS_CSV)
+        signals_df = pd.read_csv(SENTIMENT_SIGNALS_CSV, dtype={'cusip': str})
         if signals_df.empty:
             print(f"Sentiment signals file {SENTIMENT_SIGNALS_CSV} is empty.")
             return
@@ -173,6 +175,7 @@ def main():
     portfolio = {'cash': INITIAL_CAPITAL, 'holdings_value': 0.0, 'total_value': INITIAL_CAPITAL}
     positions = {ticker: {'shares': 0, 'value': 0.0} for ticker in all_price_data.keys()}
     portfolio_history = pd.DataFrame(index=backtest_date_range, columns=['total_value'])
+    trades_executed = [] # Initialize list to log trades
 
     print(f"\nStarting backtest with initial capital: ${INITIAL_CAPITAL:,.2f}")
     print(f"Date range: {min_price_date.strftime('%Y-%m-%d')} to {max_price_date.strftime('%Y-%m-%d')}")
@@ -192,53 +195,68 @@ def main():
 
         # --- Trading Logic ---
         # Identify stocks that have an active signal today
-        target_holdings = {} # Tickers we want to hold based on today's signals
+        target_holdings = {} # Stores {'ticker': {'action': 'buy'/'sell', 'triggering_score': score}}
         for ticker, score in active_signals_today.items():
-            if score >= BUY_THRESHOLD: # Changed from > to >=
-                target_holdings[ticker] = 'buy'
-            elif score < SELL_THRESHOLD and positions[ticker]['shares'] > 0 : # If we hold it and signal is sell
-                target_holdings[ticker] = 'sell'
+            if score >= BUY_THRESHOLD:
+                target_holdings[ticker] = {'action': 'buy', 'triggering_score': score}
+            elif score < SELL_THRESHOLD and positions[ticker]['shares'] > 0 :
+                target_holdings[ticker] = {'action': 'sell', 'triggering_score': score}
             # else: no action or hold if already holding
 
-        num_buys = sum(1 for action in target_holdings.values() if action == 'buy')
+        num_buys = sum(1 for details in target_holdings.values() if details['action'] == 'buy')
         capital_per_buy = 0
         if num_buys > 0:
-            # Simplified allocation: use a portion of *current total portfolio value* for new buys
-            # Or, more simply, a fixed fraction of available cash. Let's use available cash.
-            # This doesn't do full rebalancing to equal weights across all target buys yet.
             capital_per_buy = portfolio['cash'] / num_buys
 
 
-        for ticker, action in target_holdings.items():
+        for ticker, trade_info in target_holdings.items():
+            action = trade_info['action']
+            triggering_score = trade_info['triggering_score']
+
             if ticker not in all_price_data or current_date not in all_price_data[ticker].index:
-                # print(f"Skipping {ticker} on {current_date.strftime('%Y-%m-%d')}: No price data for execution.")
                 continue
 
-            # Assume execution at next available open price.
-            # For simplicity, using current_date's open if available, or skip if it's a signal generation day.
-            # A proper backtester would queue trades for T+1 open.
-            # Let's assume signal is generated based on previous day's close, trade on current_date's open.
             execution_price = all_price_data[ticker].loc[current_date, 'Open']
             if pd.isna(execution_price):
-                # print(f"Skipping {action} for {ticker} on {current_date.strftime('%Y-%m-%d')}: No open price.")
                 continue
 
-            if action == 'buy' and positions[ticker]['shares'] == 0: # If not already holding
-                if portfolio['cash'] > 0: # Ensure cash available
+            if action == 'buy' and positions[ticker]['shares'] == 0:
+                if portfolio['cash'] > 0:
                     shares_to_buy_approx = capital_per_buy / execution_price
-                    shares_to_buy = int(shares_to_buy_approx) # Buy whole shares
+                    shares_to_buy = int(shares_to_buy_approx)
                     cost = shares_to_buy * execution_price
                     if shares_to_buy > 0 and portfolio['cash'] >= cost:
+                        trades_executed.append({
+                            'Date': current_date.strftime('%Y-%m-%d'),
+                            'Ticker': ticker,
+                            'Action': 'Buy',
+                            'Price': execution_price,
+                            'Shares': shares_to_buy,
+                            'SentimentScoreAtTrade': triggering_score,
+                            'PortfolioCashBeforeTrade': portfolio['cash'],
+                            'PortfolioValueBeforeTrade': portfolio['total_value']
+                        })
                         positions[ticker]['shares'] += shares_to_buy
                         portfolio['cash'] -= cost
-                        print(f"{current_date.strftime('%Y-%m-%d')}: BOUGHT {shares_to_buy} {ticker} @ ${execution_price:.2f}, Cost: ${cost:.2f}")
+                        print(f"{current_date.strftime('%Y-%m-%d')}: BOUGHT {shares_to_buy} {ticker} @ ${execution_price:.2f}, Cost: ${cost:.2f}, Sentiment: {triggering_score:.2f}")
 
             elif action == 'sell' and positions[ticker]['shares'] > 0:
-                shares_to_sell = positions[ticker]['shares'] # Sell all
+                shares_to_sell = positions[ticker]['shares']
                 proceeds = shares_to_sell * execution_price
+
+                trades_executed.append({
+                    'Date': current_date.strftime('%Y-%m-%d'),
+                    'Ticker': ticker,
+                    'Action': 'Sell',
+                    'Price': execution_price,
+                    'Shares': shares_to_sell,
+                    'SentimentScoreAtTrade': triggering_score,
+                    'PortfolioCashBeforeTrade': portfolio['cash'],
+                    'PortfolioValueBeforeTrade': portfolio['total_value']
+                })
                 positions[ticker]['shares'] = 0
                 portfolio['cash'] += proceeds
-                print(f"{current_date.strftime('%Y-%m-%d')}: SOLD {shares_to_sell} {ticker} @ ${execution_price:.2f}, Proceeds: ${proceeds:.2f}")
+                print(f"{current_date.strftime('%Y-%m-%d')}: SOLD {shares_to_sell} {ticker} @ ${execution_price:.2f}, Proceeds: ${proceeds:.2f}, Sentiment: {triggering_score:.2f}")
 
         # --- Daily Portfolio Valuation (Mark-to-Market) ---
         current_holdings_value = 0
@@ -277,6 +295,18 @@ def main():
             print(f"\nDaily portfolio performance saved to: {PORTFOLIO_PERFORMANCE_CSV}")
         except Exception as e:
             print(f"Error saving portfolio performance: {e}")
+
+        # Save Trades Log
+        if trades_executed:
+            trades_df = pd.DataFrame(trades_executed)
+            trades_log_csv = os.path.join(OUTPUT_DIR, "trades_log.csv")
+            try:
+                trades_df.to_csv(trades_log_csv, index=False)
+                print(f"Trades log saved to: {trades_log_csv}")
+            except Exception as e:
+                print(f"Error saving trades log: {e}")
+        else:
+            print("No trades were executed during the backtest.")
 
 if __name__ == "__main__":
     main()

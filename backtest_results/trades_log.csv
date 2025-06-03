@@ -1,0 +1,2 @@
+Date,Ticker,Action,Price,Shares,SentimentScoreAtTrade,PortfolioCashBeforeTrade,PortfolioValueBeforeTrade
+2024-01-02,AXP,Buy,186.4900054931641,536,0.0856667650174947,100000.0,100000.0
