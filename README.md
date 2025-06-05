@@ -239,3 +239,183 @@ During development, an example iteration involved:
 *   **Expanded Data Sources:** Incorporate other data sources like news sentiment, macroeconomic indicators, or alternative data to enrich trading signals.
 *   **Refined Signal Timing:** More accurately model the delay between the actual quarter end (`reportingDate` from the 13F primary document), the filing date of the 13F, and when this information would realistically be processed and actionable.
 *   **Handling of Amendments:** The current scraper logic for selecting unique quarters might pick an amendment over an original filing or vice-versa based purely on filing date. A more robust approach would identify original (13F-HR) and amended (13F-HR/A) filings for the same reporting period and decide how to use them (e.g., always use the latest amendment, or consolidate data).
+
+
+## Generating a 5-Year Dataset for Comprehensive Backtesting
+
+To perform robust backtesting over a longer period (e.g., 5 years) and with a diversified set of "Smart Money" managers, follow these data generation steps. This involves configuring the EDGAR scraper, processing the downloaded data, and fetching extensive historical price data.
+
+**Assumptions:**
+*   You have a list of CIKs for the "Smart Money" managers you wish to track.
+*   The Python environment is set up with all necessary libraries (see "Setup and Dependencies" section).
+
+**Step 1: Configure and Run `edgar_scraper.py`**
+
+1.  **Edit `edgar_scraper.py`:**
+    *   **User-Agent:** Ensure `HEADERS['User-Agent']` is set to a compliant string (e.g., `'YourCompanyName YourContactEmail@example.com'`) as per SEC guidelines to avoid being blocked.
+    *   **Target CIKs and Quarters:** Modify the `main()` function call within the `if __name__ == "__main__":` block.
+        *   `ciks_to_fetch`: Provide a list of CIK strings for your chosen "Smart Money" managers. For a diversified analysis, aim for 10-20 reputable managers known for long-term investments.
+            ```python
+            # Example for CIKs and number of quarters
+            ciks_to_fetch = ['CIK1', 'CIK2', '...', 'CIK20'] # Replace with actual CIKs
+            num_quarters_to_fetch = 20 # For 5 years (4 quarters/year * 5 years)
+            main(ciks_to_fetch=ciks_to_fetch, num_quarters_to_fetch=num_quarters_to_fetch)
+            ```
+        *   Alternatively, if you have specific filing URLs spanning the desired period for your selected managers, you can use the `target_urls` parameter.
+
+2.  **Run the Scraper:**
+    ```bash
+    python edgar_scraper.py
+    ```
+    *   **Important Considerations:**
+        *   This step can take a significant amount of time, especially for many CIKs and quarters. Plan accordingly.
+        *   SEC EDGAR may rate-limit or block frequent, automated requests. The script includes some delays, but persistent issues may require running the script in smaller batches (e.g., fewer CIKs or quarters at a time) or from different IP addresses if possible.
+        *   Ensure sufficient disk space for downloaded filings in the `13f_filings/` directory. A 5-year dataset for 20 managers can result in hundreds of filings.
+
+**Step 2: Process Downloaded 13F Filings**
+
+1.  **Run `process_13f_data.py`:** This script parses the raw filings from `13f_filings/` and creates the `processed_13f_data/consolidated_13f_holdings.csv` file. This step can also be time-consuming if many filings were downloaded.
+    ```bash
+    python process_13f_data.py
+    ```
+
+**Step 3: Filter for Smart Money Holdings**
+
+1.  **Edit `filter_smart_money.py`:**
+    *   Update the `SMART_MONEY_CIKS` list in this script to match *exactly* the CIKs you used in `edgar_scraper.py` in Step 1. This ensures consistency in your dataset.
+        ```python
+        SMART_MONEY_CIKS = ['CIK1', 'CIK2', '...', 'CIK20'] # Must match CIKs from Step 1
+        ```
+
+2.  **Run `filter_smart_money.py`:** This filters the consolidated data and creates `processed_13f_data/smart_money_holdings.csv`.
+    ```bash
+    python filter_smart_money.py
+    ```
+
+**Step 4: Construct Sentiment Signals**
+
+1.  **Run `construct_sentiment_signal.py`:** This script uses `smart_money_holdings.csv` to calculate sentiment scores based on changes in holdings and generates `processed_13f_data/sentiment_signals.csv`.
+    ```bash
+    python construct_sentiment_signal.py
+    ```
+    *   For initial data generation, the default `WEIGHT_` parameters within this script can be used. You might experiment with these weights later for comparative strategy analysis by regenerating this signals file with different settings.
+
+**Step 5: Acquire Historical Price Data**
+
+1.  **Edit `get_price_history.py`:**
+    *   **CUSIP-to-Ticker Mapping (`cusip_to_ticker_map`):** This is a critical and potentially laborious step. The script needs to map CUSIPs (from `sentiment_signals.csv`) to ticker symbols that `yfinance` can use.
+        *   You will likely need to significantly expand the `cusip_to_ticker_map` dictionary to cover all unique CUSIPs present in your 5-year `sentiment_signals.csv`. This map is essential for fetching the correct price data.
+        *   For CUSIPs that `yfinance` cannot find (e.g., delisted stocks, different ticker symbol conventions), you may need to find alternative ticker symbols or accept that price data might not be available for all CUSIPs.
+        *   Consider using external data sources or APIs for more robust CUSIP-to-Ticker mapping if dealing with a very large and diverse set of CUSIPs. This script currently relies on a manual map.
+    *   **Date Range:** The script automatically determines the required date range from the earliest `reporting_date` in your `sentiment_signals.csv`. `yfinance` will attempt to fetch data for this entire period.
+
+2.  **Run `get_price_history.py`:**
+    ```bash
+    python get_price_history.py
+    ```
+    *   This will download historical price data for all successfully mapped tickers and save them as individual CSV files in the `price_data/` directory.
+    *   This step can also be very time-consuming, depending on the number of unique tickers and the length of the historical period. It requires a stable internet connection.
+    *   Monitor for any errors from `yfinance` regarding missing tickers.
+
+**Step 6: Verify Data and Prepare for Backtesting**
+
+*   **Review Output Files:**
+    *   Inspect `processed_13f_data/sentiment_signals.csv`: Check the number of unique CUSIPs, the range of `reporting_date`s, and the distribution of sentiment scores.
+    *   Inspect the `price_data/` directory: Verify that CSV files have been created for the majority of your expected tickers. Check a few files for correct OHLCV data and date ranges.
+*   **Consistency Checks:**
+    *   Ensure the date ranges in your price data align with the dates in your sentiment signals.
+    *   Note any CUSIPs for which price data could not be fetched; these cannot be included in backtests that require daily pricing.
+*   **Backup Your Dataset:** Once generated, consider backing up the `processed_13f_data/` and `price_data/` directories, especially if the generation process was lengthy.
+
+You are now ready to run `backtest_strategy.py` using this comprehensive 5-year dataset. Remember to use the command-line arguments to point the backtester to your generated files if they differ from default paths, and to experiment with different strategy parameters (e.g., `--buy_threshold`, `--signal_lag_days`, `--run_name_suffix`).
+
+This detailed data generation process, while intensive, is crucial for conducting meaningful long-term backtests and deriving more reliable insights from your strategy analysis.
+
+
+## Strategy for Comparative Analysis and Iteration
+
+After generating a comprehensive dataset (e.g., 5 years) and refactoring `backtest_strategy.py` for parameterized runs, you can perform comparative analysis to find optimal strategy configurations. The goal is to improve risk-adjusted returns while meeting diversification objectives.
+
+**1. Baseline Backtest Run**
+
+*   Start with a baseline run using the default or initial set of parameters on your full dataset.
+    ```bash
+    python backtest_strategy.py --signals_file "processed_13f_data/sentiment_signals.csv" --price_dir "price_data/" --output_dir "backtest_results/" --initial_capital 100000.0 --buy_threshold 0.07 --signal_lag_days 1 --run_name_suffix "_baseline"
+    ```
+*   Carefully record the performance metrics and analyze the output CSVs (`portfolio_daily_performance_baseline.csv`, `trades_log_baseline.csv`, `quarterly_portfolio_composition_baseline.csv`). This is your benchmark.
+
+**2. Iterative Parameter Adjustment and Analysis**
+
+Change one key parameter at a time to understand its impact. Use the `--run_name_suffix` to save results for each run in a uniquely named set of files. This ensures that results from different runs are stored separately for easy comparison.
+
+**A. Varying `buy_threshold`:**
+*   This threshold determines the sensitivity to sentiment scores for initiating positions. A lower threshold means the strategy will act on weaker signals, while a higher threshold requires stronger conviction.
+*   Test a range of values, for example:
+    ```bash
+    # Example: Test a lower threshold
+    python backtest_strategy.py --buy_threshold 0.03 --run_name_suffix "_thresh0.03" # ... other params as baseline ...
+    # Example: Test a slightly lower threshold
+    python backtest_strategy.py --buy_threshold 0.05 --run_name_suffix "_thresh0.05" # ... other params as baseline ...
+    # Example: Test a higher threshold
+    python backtest_strategy.py --buy_threshold 0.10 --run_name_suffix "_thresh0.10" # ... other params as baseline ...
+    ```
+*   **Analysis:**
+    *   Lower thresholds might lead to more positions being taken. This could improve diversification if many stocks have weaker positive signals, but it might also introduce lower quality (less predictive) signals into the portfolio.
+    *   Higher thresholds will likely result in fewer, higher-conviction positions. This could lead to higher concentration if not managed by other diversification rules (like the 40% max weight).
+    *   Observe the impact on total returns, Sharpe ratio, maximum drawdown, the average number of holdings per rebalance, and the frequency of hitting max concentration limits.
+
+**B. Varying `signal_lag_days`:**
+*   This parameter simulates delays in processing 13F data and making it actionable. Realistically, 13F filings are due 45 days after the quarter-end, and processing takes additional time.
+*   Test values reflecting realistic delays. The default might be very optimistic (e.g., 1 day).
+    ```bash
+    python backtest_strategy.py --signal_lag_days 5 --run_name_suffix "_lag5" # ... other params ...
+    python backtest_strategy.py --signal_lag_days 15 --run_name_suffix "_lag15" # ... other params ...
+    python backtest_strategy.py --signal_lag_days 30 --run_name_suffix "_lag30" # ... other params ...
+    python backtest_strategy.py --signal_lag_days 45 --run_name_suffix "_lag45" # ... other params ...
+    python backtest_strategy.py --signal_lag_days 50 --run_name_suffix "_lag50" # Simulating actionable date post-filing deadline
+    ```
+*   **Analysis:** Longer lags are expected to erode performance as the sentiment signals become stale. Quantify this erosion by observing changes in returns and other performance metrics. This helps understand the strategy's sensitivity to information delay.
+
+**C. Varying "Smart Money" CIK List (More Involved):**
+*   The definition of "Smart Money" (i.e., the list of CIKs used) is a fundamental driver of signal quality.
+*   **Process:**
+    1.  Prepare different lists of CIKs. For example, save them in text files (e.g., `smart_money_value_investors.txt`, `smart_money_tech_focused.txt`).
+    2.  You would need to modify `filter_smart_money.py` to accept a CIK list file as an argument or temporarily change its internal `SMART_MONEY_CIKS` list.
+    3.  Re-run `python filter_smart_money.py`.
+    4.  Re-run `python construct_sentiment_signal.py`. This will generate a new `sentiment_signals.csv` based on the chosen CIK set. It's advisable to save this signals file with a descriptive name (e.g., `sentiment_signals_value_investors.csv`).
+    5.  Run `backtest_strategy.py` using the newly generated signals file:
+        ```bash
+        python backtest_strategy.py --signals_file "processed_13f_data/sentiment_signals_value_investors.csv" --run_name_suffix "_cik_value" # ... other params ...
+        ```
+*   **CIK Categories to Test (Examples):**
+    *   **Concentrated "Gurus":** Managers known for high-conviction, relatively concentrated portfolios.
+    *   **Value-Oriented Managers:** Funds adhering to value investing principles.
+    *   **Growth-Oriented Managers:** Funds focusing on growth stocks.
+    *   **Sector Specialists:** Managers focusing on specific sectors (e.g., technology, healthcare).
+    *   **Highly Diversified Managers:** Larger funds that tend to hold many positions.
+*   **Analysis:** Compare performance metrics (returns, Sharpe, drawdown) and portfolio characteristics (e.g., sector biases, average holding period implied by signal changes, volatility) resulting from different manager groups. This can reveal which types of "Smart Money" provide the most alpha for this particular sentiment definition.
+
+**D. Varying Sentiment Score Weights (More Involved):**
+*   The weights in `construct_sentiment_signal.py` (e.g., `WEIGHT_CHANGE_NUM_INVESTORS`, `WEIGHT_PCT_CHANGE_VALUE`, `WEIGHT_PCT_CHANGE_SHARES`) determine how different aspects of 13F holding changes contribute to the final sentiment score.
+*   **Process:**
+    1.  Edit the weight constants at the top of `construct_sentiment_signal.py`.
+    2.  Re-run `python construct_sentiment_signal.py`. Save the output `sentiment_signals.csv` with a descriptive name (e.g., `sentiment_signals_weights_v2.csv`).
+    3.  Run `backtest_strategy.py` with the new signals file:
+        ```bash
+        python backtest_strategy.py --signals_file "processed_13f_data/sentiment_signals_weights_v2.csv" --run_name_suffix "_weights_v2" # ... other params ...
+        ```
+*   **Analysis:** Observe how changing the emphasis (e.g., giving more weight to the number of investors versus the percentage change in value) affects the quality of signals and the resulting backtest outcomes.
+
+**3. Evaluation and Decision Making**
+
+*   **Systematic Recording:** For each run, meticulously log all parameters used (including any changes made to scripts like `filter_smart_money.py` or `construct_sentiment_signal.py`) and the key performance metrics (`Total Return`, `Annualized Return`, `Sharpe Ratio`, `Max Drawdown`, average number of holdings per rebalance, maximum concentration observed in any stock) in a spreadsheet or a dedicated analysis notebook.
+*   **Performance vs. Risk:** Prioritize configurations that offer a consistently good Sharpe ratio (indicating better risk-adjusted returns) and acceptable maximum drawdown levels according to your risk tolerance.
+*   **Diversification Goals:** Ensure the strategy consistently meets the diversification targets (e.g., aiming for at least 5 stocks if possible, individual stock weights not exceeding 40%). If results show excessive concentration or too few holdings, revisit parameters influencing stock selection breadth (like `buy_threshold`) or the diversity of the CIK list.
+*   **Qualitative Analysis:** Review the `quarterly_portfolio_composition_[suffix].csv` for selected promising runs. Do the chosen stocks and their weights make intuitive sense based on the strategy's intent? Is portfolio turnover (implied by changes in composition files) excessively high, which might incur significant (unmodeled) transaction costs in live trading?
+
+**4. Further Iteration and Refinement**
+
+*   Based on the most promising results from single-parameter variations, you can start testing combinations of optimal parameters (e.g., the best `buy_threshold` found with the most effective `signal_lag_days`).
+*   If overall performance remains unsatisfactory across various configurations, it might indicate a need to explore more fundamental changes to the signal generation logic itself (e.g., different metrics in `construct_sentiment_signal.py`) or the potential need to incorporate other data sources beyond 13F filings.
+
+This iterative approach, combining quantitative metrics with qualitative portfolio analysis, is key to developing, understanding, and validating a robust trading strategy.

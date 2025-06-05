@@ -1,38 +1,40 @@
 import pandas as pd
 import numpy as np
 import os
+import argparse # Added for command-line arguments
 from datetime import timedelta
 
-# --- Configuration ---
-SENTIMENT_SIGNALS_CSV = "processed_13f_data/sentiment_signals.csv"
-PRICE_DATA_DIR = "price_data/"
-OUTPUT_DIR = "backtest_results"
-PORTFOLIO_PERFORMANCE_CSV = os.path.join(OUTPUT_DIR, "portfolio_daily_performance.csv")
-QUARTERLY_PORTFOLIO_COMPOSITION_CSV = os.path.join(OUTPUT_DIR, "quarterly_portfolio_composition.csv")
-
-INITIAL_CAPITAL = 100000.0
-# Simple Long-Only Strategy:
-# Buy if sentiment score > BUY_THRESHOLD
-# Sell (exit position) if sentiment score < SELL_THRESHOLD (or if it simply drops)
-# For this version, we'll hold until the next signal for that stock, or until end of backtest.
-# A more advanced strategy would have explicit sell signals or stop-losses.
-BUY_THRESHOLD = 0.07
+# --- Global constants that are not typically changed by CLI args ---
+# SELL_THRESHOLD is not actively used in the current quarterly full liquidation strategy,
+# but kept for potential future strategy variations.
 SELL_THRESHOLD = -0.02
-
-# Lag for signal activation (e.g., 1 day after reporting_date, or more realistically 15-45 days after quarter end)
-# For 13F, reporting_date is the end of the quarter. Filings are due 45 days later.
-# Let's assume signal is actionable 1 business day after the FILING_DATE (which we don't have).
-# For simplicity now, let's assume signal is known on reporting_date + SIGNAL_LAG_DAYS for action on next trading day.
-SIGNAL_LAG_DAYS = 1 # Trade on T+1 after reporting_date (highly simplified)
-
 RISK_FREE_RATE = 0.00 # For Sharpe Ratio
 
 # --- Helper Functions ---
 
-def ensure_output_dir_exists():
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
-        print(f"Created directory: {OUTPUT_DIR}")
+def parse_arguments():
+    """Parses command-line arguments."""
+    parser = argparse.ArgumentParser(description="Run a backtesting strategy for 13F sentiment signals.")
+    parser.add_argument('--signals_file', type=str, default="processed_13f_data/sentiment_signals.csv",
+                        help="Path to the sentiment signals CSV file.")
+    parser.add_argument('--price_dir', type=str, default="price_data/",
+                        help="Directory containing historical price CSV files for tickers.")
+    parser.add_argument('--output_dir', type=str, default="backtest_results/",
+                        help="Directory to save backtest results.")
+    parser.add_argument('--initial_capital', type=float, default=100000.0,
+                        help="Initial capital for the backtest.")
+    parser.add_argument('--buy_threshold', type=float, default=0.07,
+                        help="Sentiment score threshold to trigger a buy.")
+    parser.add_argument('--signal_lag_days', type=int, default=1,
+                        help="Number of days to lag the signal activation after reporting date.")
+    parser.add_argument('--run_name_suffix', type=str, default="",
+                        help="Suffix to append to output file names (e.g., '_run1').")
+    return parser.parse_args()
+
+def ensure_output_dir_exists(output_dir):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"Created directory: {output_dir}")
 
 def map_cusip_to_ticker(cusip):
     """
@@ -55,12 +57,12 @@ def map_cusip_to_ticker(cusip):
 
 def load_price_data(ticker_list):
     """
-    Loads all price data CSVs for the given tickers.
+    Loads all price data CSVs for the given tickers from the specified price_dir.
     Returns a dictionary of DataFrames, keyed by ticker.
     """
     price_data = {}
     for ticker in ticker_list:
-        filepath = os.path.join(PRICE_DATA_DIR, f"{ticker}.csv")
+        filepath = os.path.join(price_dir, f"{ticker}.csv") # Use price_dir argument
         if os.path.exists(filepath):
             try:
                 df = pd.read_csv(filepath, parse_dates=['Date'], index_col='Date')
@@ -74,7 +76,7 @@ def load_price_data(ticker_list):
             print(f"Warning: Price data file not found for ticker {ticker} at {filepath}")
     return price_data
 
-def calculate_performance_metrics(portfolio_values_series, risk_free_rate=RISK_FREE_RATE):
+def calculate_performance_metrics(portfolio_values_series, risk_free_rate_param=RISK_FREE_RATE): # Use a parameter for clarity
     """Calculates common performance metrics."""
     if portfolio_values_series.empty or len(portfolio_values_series) < 2:
         return {
@@ -95,7 +97,7 @@ def calculate_performance_metrics(portfolio_values_series, risk_free_rate=RISK_F
 
     sharpe_ratio = 0
     if annualized_volatility != 0:
-        sharpe_ratio = (annualized_return - risk_free_rate) / annualized_volatility
+        sharpe_ratio = (annualized_return - risk_free_rate_param) / annualized_volatility
 
     # Max Drawdown
     cumulative_returns = (1 + daily_returns).cumprod()
@@ -117,30 +119,35 @@ def calculate_performance_metrics(portfolio_values_series, risk_free_rate=RISK_F
     }
 
 # --- Main Backtesting Logic ---
-def main():
-    ensure_output_dir_exists()
+def main(args): # Accept parsed arguments
+    ensure_output_dir_exists(args.output_dir)
+
+    # Define output file paths using args
+    portfolio_performance_csv_path = os.path.join(args.output_dir, f"portfolio_daily_performance{args.run_name_suffix}.csv")
+    trades_log_csv_path = os.path.join(args.output_dir, f"trades_log{args.run_name_suffix}.csv")
+    quarterly_portfolio_composition_csv_path = os.path.join(args.output_dir, f"quarterly_portfolio_composition{args.run_name_suffix}.csv")
 
     # 1. Load Sentiment Signals
-    if not os.path.exists(SENTIMENT_SIGNALS_CSV):
-        print(f"Error: Sentiment signals file not found: {SENTIMENT_SIGNALS_CSV}")
+    if not os.path.exists(args.signals_file):
+        print(f"Error: Sentiment signals file not found: {args.signals_file}")
         return
     try:
-        signals_df = pd.read_csv(SENTIMENT_SIGNALS_CSV, dtype={'cusip': str})
+        signals_df = pd.read_csv(args.signals_file, dtype={'cusip': str})
         if signals_df.empty:
-            print(f"Sentiment signals file {SENTIMENT_SIGNALS_CSV} is empty.")
+            print(f"Sentiment signals file {args.signals_file} is empty.")
             return
     except Exception as e:
         print(f"Error reading sentiment signals CSV: {e}")
         return
 
     signals_df['reporting_date'] = pd.to_datetime(signals_df['reporting_date'])
-    signals_df['signal_active_date'] = signals_df['reporting_date'] + timedelta(days=SIGNAL_LAG_DAYS)
+    signals_df['signal_active_date'] = signals_df['reporting_date'] + timedelta(days=args.signal_lag_days)
 
     # --- Determine Rebalancing Dates ---
     # These are the dates on which we will actually execute trades (sell all, then buy new)
     # It's derived from unique reporting_dates + SIGNAL_LAG_DAYS
     unique_reporting_dates = signals_df['reporting_date'].sort_values().unique()
-    rebalancing_dates = sorted(list(pd.to_datetime(unique_reporting_dates) + timedelta(days=SIGNAL_LAG_DAYS)))
+    rebalancing_dates = sorted(list(pd.to_datetime(unique_reporting_dates) + timedelta(days=args.signal_lag_days)))
     # Ensure rebalancing_dates are business days and within the overall price data range later.
     # For now, we just generate them. We'll filter them against backtest_date_range.
 
@@ -154,7 +161,7 @@ def main():
 
     # 2. Load Price Data for relevant tickers
     tickers_with_signals = signals_df['ticker'].unique().tolist()
-    all_price_data = load_price_data(tickers_with_signals)
+    all_price_data = load_price_data(tickers_with_signals, args.price_dir) # Pass price_dir
 
     if not all_price_data:
         print("No price data loaded. Cannot proceed with backtest. Ensure price_data CSVs exist for mapped tickers.")
@@ -184,14 +191,15 @@ def main():
 
 
     # Initialize Portfolio
-    portfolio = {'cash': INITIAL_CAPITAL, 'holdings_value': 0.0, 'total_value': INITIAL_CAPITAL}
+    portfolio = {'cash': args.initial_capital, 'holdings_value': 0.0, 'total_value': args.initial_capital}
     # Store execution price along with shares and value for logging quarterly composition
     positions = {ticker: {'shares': 0, 'value': 0.0, 'execution_price': 0.0} for ticker in all_price_data.keys()}
     portfolio_history = pd.DataFrame(index=backtest_date_range, columns=['total_value'])
     trades_executed = [] # Initialize list to log trades
     quarterly_portfolio_log = [] # For logging portfolio composition after each rebalance
 
-    print(f"\nStarting backtest with initial capital: ${INITIAL_CAPITAL:,.2f}")
+    print(f"\nStarting backtest with initial capital: ${args.initial_capital:,.2f}")
+    print(f"Buy Threshold: {args.buy_threshold}, Signal Lag: {args.signal_lag_days} days")
     print(f"Date range: {min_price_date.strftime('%Y-%m-%d')} to {max_price_date.strftime('%Y-%m-%d')}")
     if rebalancing_dates:
         print(f"First rebalancing date: {rebalancing_dates[0].strftime('%Y-%m-%d')}")
@@ -206,7 +214,7 @@ def main():
         # --- Quarterly Rebalancing Logic ---
         if current_date in rebalancing_dates_set:
             print(f"\n--- Rebalancing Day: {current_date.strftime('%Y-%m-%d')} ---")
-            current_reporting_date = current_date - timedelta(days=SIGNAL_LAG_DAYS)
+            current_reporting_date = current_date - timedelta(days=args.signal_lag_days)
 
             # 1. Liquidate all existing positions
             for ticker in list(positions.keys()): # Iterate over a copy of keys if modifying dict
@@ -245,53 +253,128 @@ def main():
             for idx, signal_row in active_signals_for_rebalance.iterrows():
                 ticker = signal_row['ticker']
                 score = signal_row['sentiment_score']
-                if score >= BUY_THRESHOLD:
+                if score >= args.buy_threshold: # Use args.buy_threshold
                     buy_targets.append({'ticker': ticker, 'score': score})
 
-            print(f"Found {len(buy_targets)} potential buy targets for reporting date {current_reporting_date.strftime('%Y-%m-%d')}.")
+            print(f"Found {len(buy_targets)} potential buy targets (score >= {args.buy_threshold}) for reporting date {current_reporting_date.strftime('%Y-%m-%d')}.")
 
             # 3. Capital Allocation & Execution
-            capital_allocations = {}
+            final_allocations = {} # This will store the final capital for each stock
             if buy_targets:
-                cash_to_allocate = portfolio['cash'] # Cash after all sells
+                cash_to_allocate = portfolio['cash'] # Cash available after all sells
 
-                # Calculate total positive sentiment score for weighting
-                total_positive_sentiment_score = sum(item['score'] for item in buy_targets if item['score'] > 0)
+                # Initial provisional allocation (score-weighted or equal-weighted)
+                provisional_allocations = {}
+                original_scores_map = {item['ticker']: item['score'] for item in buy_targets}
+
+                total_positive_sentiment_score = sum(score for score in original_scores_map.values() if score > 0)
 
                 if total_positive_sentiment_score > 0:
-                    print(f"Allocating based on score weights. Total positive score: {total_positive_sentiment_score:.2f}. Cash to allocate: ${cash_to_allocate:,.2f}")
-                    for item in buy_targets:
-                        ticker = item['ticker']
-                        score = item['score']
+                    print(f"Initial allocation: Score-weighted. Total positive score: {total_positive_sentiment_score:.2f}. Cash: ${cash_to_allocate:,.2f}")
+                    for ticker, score in original_scores_map.items():
                         if score > 0:
-                            weight = score / total_positive_sentiment_score
-                            capital_allocations[ticker] = cash_to_allocate * weight
+                            provisional_allocations[ticker] = (score / total_positive_sentiment_score) * cash_to_allocate
                         else:
-                            # Assign zero capital if score is not positive, even if it met BUY_THRESHOLD (e.g. BUY_THRESHOLD <= 0)
-                            capital_allocations[ticker] = 0.0
-                else: # Fallback: Equal weight if no positive scores or no buy_targets (though covered by outer 'if buy_targets')
-                    print("Total positive sentiment score is not > 0. Falling back to equal weight allocation.")
+                            provisional_allocations[ticker] = 0.0 # No capital for non-positive scores initially
+                elif buy_targets: # Fallback to equal weight if no positive scores but targets exist
+                    print(f"Initial allocation: Equal-weighted (no positive scores). Cash: ${cash_to_allocate:,.2f}")
                     num_buys = len(buy_targets)
                     if num_buys > 0:
-                        equal_capital_per_buy = cash_to_allocate / num_buys
-                        for item in buy_targets:
-                            ticker = item['ticker']
-                            capital_allocations[ticker] = equal_capital_per_buy
+                        equal_capital = cash_to_allocate / num_buys
+                        for ticker in original_scores_map.keys():
+                            provisional_allocations[ticker] = equal_capital
 
-            if capital_allocations:
-                print("Planned capital allocations:")
-                for t, cap in capital_allocations.items():
+                # Iteratively apply 40% cap and redistribute excess
+                if provisional_allocations:
+                    max_capital_per_stock = cash_to_allocate * 0.40
+                    MAX_ITERATIONS = 10
+
+                    current_round_allocations = provisional_allocations.copy()
+
+                    for iteration in range(MAX_ITERATIONS):
+                        print(f"Cap & Redistribute Iteration {iteration + 1}")
+                        excess_from_capping_this_round = 0
+                        stocks_newly_capped_this_round = {} # Ticker -> capped_amount
+
+                        eligible_for_capping_pass = {t: v for t, v in current_round_allocations.items() if t not in final_allocations and v > 0.01}
+
+                        if not eligible_for_capping_pass:
+                            print("No stocks eligible for current capping pass.")
+                            break
+
+                        # Identify stocks exceeding cap and calculate excess
+                        for ticker, proposed_capital in eligible_for_capping_pass.items():
+                            if proposed_capital > max_capital_per_stock:
+                                stocks_newly_capped_this_round[ticker] = max_capital_per_stock
+                                excess_from_capping_this_round += (proposed_capital - max_capital_per_stock)
+
+                        # Move newly capped stocks to final_allocations
+                        for ticker, capped_amount in stocks_newly_capped_this_round.items():
+                            final_allocations[ticker] = capped_amount
+                            current_round_allocations.pop(ticker, None) # Remove from current round's pool
+
+                        if excess_from_capping_this_round < 0.01: # Minimal or no excess to redistribute
+                            print("No significant excess capital to redistribute in this iteration.")
+                            break
+
+                        # Prepare for redistribution: stocks not yet in final_allocations
+                        pool_for_redistribution = {t: v for t,v in current_round_allocations.items() if t not in final_allocations and v > 0.01}
+                        if not pool_for_redistribution:
+                            print(f"Excess capital ${excess_from_capping_this_round:,.2f} remains but no stocks to redistribute to.")
+                            # This excess will implicitly remain in portfolio cash
+                            break
+
+                        # Sum original scores of stocks in the current redistribution pool
+                        sum_scores_redist_pool = sum(original_scores_map[t] for t in pool_for_redistribution if original_scores_map.get(t,0) > 0)
+
+                        if sum_scores_redist_pool > 0: # Redistribute based on score
+                            print(f"Redistributing ${excess_from_capping_this_round:,.2f} based on scores to {len(pool_for_redistribution)} stocks.")
+                            for ticker in list(pool_for_redistribution.keys()): # list() for safe modification
+                                score = original_scores_map.get(ticker,0)
+                                if score > 0:
+                                    additional_capital = (score / sum_scores_redist_pool) * excess_from_capping_this_round
+                                    current_round_allocations[ticker] += additional_capital
+                        else: # Fallback: Redistribute excess equally if no positive scores in pool
+                            print(f"Redistributing ${excess_from_capping_this_round:,.2f} equally to {len(pool_for_redistribution)} stocks (no positive scores in pool).")
+                            if pool_for_redistribution: # Ensure non-empty before division
+                                capital_per_ticker_excess = excess_from_capping_this_round / len(pool_for_redistribution)
+                                for ticker in list(pool_for_redistribution.keys()):
+                                     current_round_allocations[ticker] += capital_per_ticker_excess
+                            else: # Should not happen due to check above, but as safeguard
+                                print(f"Error: Tried equal redistribution with no pool. Excess ${excess_from_capping_this_round:,.2f} remains.")
+                                break # Break from iterations
+
+                        if iteration == MAX_ITERATIONS - 1:
+                            print("Warning: Max iterations reached in capital allocation capping.")
+
+                    # Add any remaining allocations from current_round_allocations (that were never capped) to final_allocations
+                    for ticker, capital in current_round_allocations.items():
+                        if ticker not in final_allocations:
+                            if capital > max_capital_per_stock: # Final check against cap
+                                final_allocations[ticker] = max_capital_per_stock
+                                print(f"Post-loop cap for {ticker} at ${max_capital_per_stock:,.2f}. Initial: ${capital:,.2f}")
+                            elif capital > 1.0: # Minimum meaningful allocation
+                                final_allocations[ticker] = capital
+                            else:
+                                print(f"Final allocation for {ticker} (${capital:,.2f}) too small, discarded.")
+                else: # No buy_targets initially
+                    print("No buy targets to allocate capital to.")
+
+            if final_allocations:
+                print("Final capital allocations after 40% cap and redistribution:")
+                for t, cap in final_allocations.items():
                     print(f"  {t}: ${cap:,.2f}")
+                print(f"Total allocated: ${sum(final_allocations.values()):,.2f} from initial cash of ${cash_to_allocate:,.2f}")
 
-            # Execute trades based on calculated allocations
-            for target_item in buy_targets: # Iterate buy_targets to easily get original score for logging
-                ticker = target_item['ticker']
-                original_score = target_item['score'] # Score used for BUY_THRESHOLD and weighting
-
-                allocated_capital = capital_allocations.get(ticker)
-                if allocated_capital is None or allocated_capital <= 1.0: # Check for None and skip if capital is negligible (e.g. $1)
-                    print(f"Skipping buy for {ticker}: No capital allocated or allocation too small (${allocated_capital:.2f}).")
+            # Execute trades based on final_allocations
+            # Note: The `buy_targets` list still holds all initial candidates. We only trade those in `final_allocations`.
+            for ticker, allocated_capital in final_allocations.items():
+                if allocated_capital <= 1.0: # Skip if capital is negligible (e.g. $1)
+                    print(f"Skipping buy for {ticker}: Final allocation too small (${allocated_capital:.2f}).")
                     continue
+
+                # Retrieve original score for logging
+                original_score = original_scores_map.get(ticker, 0) # Should exist if ticker in final_allocations
 
                 if ticker not in all_price_data or current_date not in all_price_data[ticker].index:
                     print(f"Skipping buy for {ticker}: No price data available for {current_date.strftime('%Y-%m-%d')}")
@@ -302,32 +385,31 @@ def main():
                     print(f"Skipping buy for {ticker}: Invalid execution price ${execution_price} on {current_date.strftime('%Y-%m-%d')}")
                     continue
 
-                # Check if there's any cash left in the portfolio at all before attempting the trade
-                if portfolio['cash'] <= 1.0: # If practically no cash left
-                    print(f"Skipping buy for {ticker}: Insufficient total cash (${portfolio['cash']:.2f}) left in portfolio.")
-                    continue
+                if portfolio['cash'] <= 1.0: # If practically no cash left for any more trades
+                    print(f"Skipping buy for {ticker} (and subsequent buys): Insufficient total cash (${portfolio['cash']:.2f}) left in portfolio.")
+                    break # Stop trying to buy more stocks if cash is depleted
 
                 shares_to_buy_approx = allocated_capital / execution_price
                 shares_to_buy = int(shares_to_buy_approx)
                 cost = shares_to_buy * execution_price
 
-                if shares_to_buy > 0 and portfolio['cash'] >= cost :
+                if shares_to_buy > 0 and portfolio['cash'] >= cost:
                     trades_executed.append({
                         'Date': current_date.strftime('%Y-%m-%d'),
                         'Ticker': ticker,
                         'Action': 'Buy (Quarterly Rebalance)',
                         'Price': execution_price,
                         'Shares': shares_to_buy,
-                        'SentimentScoreAtTrade': original_score, # Log the score that triggered the buy
+                        'SentimentScoreAtTrade': original_score,
                         'PortfolioCashBeforeTrade': portfolio['cash'],
                         'PortfolioValueBeforeTrade': portfolio['total_value']
                     })
                     positions[ticker]['shares'] += shares_to_buy
                     positions[ticker]['execution_price'] = execution_price
                     portfolio['cash'] -= cost
-                    print(f"{current_date.strftime('%Y-%m-%d')}: BOUGHT (Q Rebalance) {shares_to_buy} {ticker} @ ${execution_price:.2f}, Cost: ${cost:.2f}, Allocated Cap: ${allocated_capital:,.2f}, Sentiment: {original_score:.2f}")
+                    print(f"{current_date.strftime('%Y-%m-%d')}: BOUGHT (Q Rebalance) {shares_to_buy} {ticker} @ ${execution_price:.2f}, Cost: ${cost:.2f}, Final Alloc Cap: ${allocated_capital:,.2f}, Sentiment: {original_score:.2f}")
                 else:
-                    print(f"Could not buy {ticker}: Shares_to_buy={shares_to_buy}, Current Cash=${portfolio['cash']:.2f}, Cost=${cost:.2f}, Allocated Cap: ${allocated_capital:,.2f}")
+                    print(f"Could not buy {ticker}: Shares_to_buy={shares_to_buy}, Current Cash=${portfolio['cash']:.2f}, Cost=${cost:.2f}, Final Alloc Cap: ${allocated_capital:,.2f}")
 
             # --- Log Portfolio Composition After Rebalancing ---
             # First, update position values based on execution prices for newly bought assets
@@ -409,24 +491,23 @@ portfolio_history.dropna(subset=['total_value'], inplace=True)
     if portfolio_history.empty:
         print("Portfolio history is empty. Cannot calculate performance metrics.")
     else:
-        metrics = calculate_performance_metrics(portfolio_history['total_value'])
+        metrics = calculate_performance_metrics(portfolio_history['total_value'], risk_free_rate_param=RISK_FREE_RATE)
         print("\n--- Backtest Performance ---")
         for metric, value in metrics.items():
             print(f"{metric}: {value:.2%}" if isinstance(value, (int, float)) and ("Return" in metric or "Rate" in metric or "Volatility" in metric or "Drawdown" in metric) else f"{metric}: {value}")
 
     # 6. Save Results
         try:
-            portfolio_history.to_csv(PORTFOLIO_PERFORMANCE_CSV)
-            print(f"\nDaily portfolio performance saved to: {PORTFOLIO_PERFORMANCE_CSV}")
+            portfolio_history.to_csv(portfolio_performance_csv_path)
+            print(f"\nDaily portfolio performance saved to: {portfolio_performance_csv_path}")
         except Exception as e:
             print(f"Error saving portfolio performance: {e}")
 
         if trades_executed:
             trades_df = pd.DataFrame(trades_executed)
-            trades_log_csv = os.path.join(OUTPUT_DIR, "trades_log.csv")
             try:
-                trades_df.to_csv(trades_log_csv, index=False)
-                print(f"Trades log saved to: {trades_log_csv}")
+                trades_df.to_csv(trades_log_csv_path, index=False)
+                print(f"Trades log saved to: {trades_log_csv_path}")
             except Exception as e:
                 print(f"Error saving trades log: {e}")
         else:
@@ -435,8 +516,8 @@ portfolio_history.dropna(subset=['total_value'], inplace=True)
     if quarterly_portfolio_log:
         quarterly_df = pd.DataFrame(quarterly_portfolio_log)
         try:
-            quarterly_df.to_csv(QUARTERLY_PORTFOLIO_COMPOSITION_CSV, index=False)
-            print(f"Quarterly portfolio composition saved to: {QUARTERLY_PORTFOLIO_COMPOSITION_CSV}")
+            quarterly_df.to_csv(quarterly_portfolio_composition_csv_path, index=False)
+            print(f"Quarterly portfolio composition saved to: {quarterly_portfolio_composition_csv_path}")
         except Exception as e:
             print(f"Error saving quarterly portfolio composition: {e}")
     else:
@@ -444,4 +525,5 @@ portfolio_history.dropna(subset=['total_value'], inplace=True)
 
 
 if __name__ == "__main__":
-    main()
+    cli_args = parse_arguments()
+    main(cli_args)
