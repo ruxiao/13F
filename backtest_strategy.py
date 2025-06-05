@@ -8,6 +8,7 @@ SENTIMENT_SIGNALS_CSV = "processed_13f_data/sentiment_signals.csv"
 PRICE_DATA_DIR = "price_data/"
 OUTPUT_DIR = "backtest_results"
 PORTFOLIO_PERFORMANCE_CSV = os.path.join(OUTPUT_DIR, "portfolio_daily_performance.csv")
+QUARTERLY_PORTFOLIO_COMPOSITION_CSV = os.path.join(OUTPUT_DIR, "quarterly_portfolio_composition.csv")
 
 INITIAL_CAPITAL = 100000.0
 # Simple Long-Only Strategy:
@@ -133,8 +134,15 @@ def main():
         return
 
     signals_df['reporting_date'] = pd.to_datetime(signals_df['reporting_date'])
-    # For simplicity, assume signal is actionable on reporting_date + lag (next available trading day)
     signals_df['signal_active_date'] = signals_df['reporting_date'] + timedelta(days=SIGNAL_LAG_DAYS)
+
+    # --- Determine Rebalancing Dates ---
+    # These are the dates on which we will actually execute trades (sell all, then buy new)
+    # It's derived from unique reporting_dates + SIGNAL_LAG_DAYS
+    unique_reporting_dates = signals_df['reporting_date'].sort_values().unique()
+    rebalancing_dates = sorted(list(pd.to_datetime(unique_reporting_dates) + timedelta(days=SIGNAL_LAG_DAYS)))
+    # Ensure rebalancing_dates are business days and within the overall price data range later.
+    # For now, we just generate them. We'll filter them against backtest_date_range.
 
     # Map CUSIPs to Tickers in signals_df
     signals_df['ticker'] = signals_df['cusip'].apply(map_cusip_to_ticker)
@@ -159,106 +167,217 @@ def main():
     backtest_date_range = pd.date_range(start=min_price_date, end=max_price_date, freq='B') # Business days
 
     # Pivot signals to have one row per date, with columns for each ticker's sentiment score
-    # Forward fill signals: a signal is active until a new one for that ticker arrives
-    daily_signals = pd.DataFrame(index=backtest_date_range)
+    # This daily_signals is used for MTM valuation. Trading decisions will use specific signals on rebalancing days.
+    daily_signals_for_valuation = pd.DataFrame(index=backtest_date_range)
 
     for ticker in tickers_with_signals:
         ticker_signals = signals_df[signals_df['ticker'] == ticker][['signal_active_date', 'sentiment_score']]
         if not ticker_signals.empty:
-            # Set signal_active_date as index, then reindex to backtest_date_range and ffill
             ticker_signals = ticker_signals.set_index('signal_active_date').sort_index()
-            # Ensure only one signal per day (take last if multiple, though unlikely with quarterly)
             ticker_signals = ticker_signals[~ticker_signals.index.duplicated(keep='last')]
-            daily_signals[ticker] = ticker_signals['sentiment_score'].reindex(backtest_date_range, method='ffill')
+            daily_signals_for_valuation[ticker] = ticker_signals['sentiment_score'].reindex(backtest_date_range, method='ffill')
+
+    # Filter rebalancing_dates to be within the actual backtest_date_range (price availability)
+    rebalancing_dates = [date for date in rebalancing_dates if date in backtest_date_range]
+    # Convert to set for faster lookups
+    rebalancing_dates_set = set(rebalancing_dates)
+
 
     # Initialize Portfolio
     portfolio = {'cash': INITIAL_CAPITAL, 'holdings_value': 0.0, 'total_value': INITIAL_CAPITAL}
-    positions = {ticker: {'shares': 0, 'value': 0.0} for ticker in all_price_data.keys()}
+    # Store execution price along with shares and value for logging quarterly composition
+    positions = {ticker: {'shares': 0, 'value': 0.0, 'execution_price': 0.0} for ticker in all_price_data.keys()}
     portfolio_history = pd.DataFrame(index=backtest_date_range, columns=['total_value'])
     trades_executed = [] # Initialize list to log trades
+    quarterly_portfolio_log = [] # For logging portfolio composition after each rebalance
 
     print(f"\nStarting backtest with initial capital: ${INITIAL_CAPITAL:,.2f}")
     print(f"Date range: {min_price_date.strftime('%Y-%m-%d')} to {max_price_date.strftime('%Y-%m-%d')}")
+    if rebalancing_dates:
+        print(f"First rebalancing date: {rebalancing_dates[0].strftime('%Y-%m-%d')}")
+        print(f"Last rebalancing date: {rebalancing_dates[-1].strftime('%Y-%m-%d')}")
+        print(f"Total rebalancing dates: {len(rebalancing_dates)}")
+    else:
+        print("No rebalancing dates found within the price data range.")
+
 
     # 4. Backtesting Loop
     for current_date in backtest_date_range:
-        if current_date not in daily_signals.index: # Skip if no signal data for this day (should not happen with reindex)
-            portfolio_history.loc[current_date, 'total_value'] = portfolio['total_value']
-            continue
+        # --- Quarterly Rebalancing Logic ---
+        if current_date in rebalancing_dates_set:
+            print(f"\n--- Rebalancing Day: {current_date.strftime('%Y-%m-%d')} ---")
+            current_reporting_date = current_date - timedelta(days=SIGNAL_LAG_DAYS)
 
-        active_signals_today = daily_signals.loc[current_date].dropna()
+            # 1. Liquidate all existing positions
+            for ticker in list(positions.keys()): # Iterate over a copy of keys if modifying dict
+                if positions[ticker]['shares'] > 0:
+                    if ticker in all_price_data and current_date in all_price_data[ticker].index:
+                        execution_price = all_price_data[ticker].loc[current_date, 'Open']
+                        if not pd.isna(execution_price):
+                            shares_to_sell = positions[ticker]['shares']
+                            proceeds = shares_to_sell * execution_price
+                            trades_executed.append({
+                                'Date': current_date.strftime('%Y-%m-%d'),
+                                'Ticker': ticker,
+                                'Action': 'Sell (Quarterly Rebalance)',
+                                'Price': execution_price,
+                                'Shares': shares_to_sell,
+                                'SentimentScoreAtTrade': np.nan, # Not relevant for liquidation
+                                'PortfolioCashBeforeTrade': portfolio['cash'],
+                                'PortfolioValueBeforeTrade': portfolio['total_value']
+                            })
+                            positions[ticker]['shares'] = 0
+                            positions[ticker]['value'] = 0.0
+                            portfolio['cash'] += proceeds
+                            print(f"{current_date.strftime('%Y-%m-%d')}: LIQUIDATED (Q Rebalance) {shares_to_sell} {ticker} @ ${execution_price:.2f}, Proceeds: ${proceeds:.2f}")
+                        else:
+                            print(f"Warning: NaN open price for {ticker} on {current_date.strftime('%Y-%m-%d')}. Cannot liquidate.")
+                    else:
+                        print(f"Warning: No price data for {ticker} on {current_date.strftime('%Y-%m-%d')}. Cannot liquidate.")
 
-        # Determine stocks to trade based on current signals vs. previous day's signals or thresholds
-        # For this simple version: if a signal is above BUY_THRESHOLD, and we don't hold it, buy.
-        # If we hold it and signal drops below SELL_THRESHOLD, sell.
-        # More realistically, trades would happen based on signals becoming *newly* active.
+            portfolio['holdings_value'] = 0.0 # All sold
 
-        # --- Trading Logic ---
-        # Identify stocks that have an active signal today
-        target_holdings = {} # Stores {'ticker': {'action': 'buy'/'sell', 'triggering_score': score}}
-        for ticker, score in active_signals_today.items():
-            if score >= BUY_THRESHOLD:
-                target_holdings[ticker] = {'action': 'buy', 'triggering_score': score}
-            elif score < SELL_THRESHOLD and positions[ticker]['shares'] > 0 :
-                target_holdings[ticker] = {'action': 'sell', 'triggering_score': score}
-            # else: no action or hold if already holding
+            # 2. Identify New Positions to Buy
+            # Get signals for the specific reporting_date that triggered this rebalance
+            active_signals_for_rebalance = signals_df[signals_df['reporting_date'] == current_reporting_date]
 
-        num_buys = sum(1 for details in target_holdings.values() if details['action'] == 'buy')
-        capital_per_buy = 0
-        if num_buys > 0:
-            capital_per_buy = portfolio['cash'] / num_buys
+            buy_targets = []
+            for idx, signal_row in active_signals_for_rebalance.iterrows():
+                ticker = signal_row['ticker']
+                score = signal_row['sentiment_score']
+                if score >= BUY_THRESHOLD:
+                    buy_targets.append({'ticker': ticker, 'score': score})
 
+            print(f"Found {len(buy_targets)} potential buy targets for reporting date {current_reporting_date.strftime('%Y-%m-%d')}.")
 
-        for ticker, trade_info in target_holdings.items():
-            action = trade_info['action']
-            triggering_score = trade_info['triggering_score']
+            # 3. Capital Allocation & Execution
+            capital_allocations = {}
+            if buy_targets:
+                cash_to_allocate = portfolio['cash'] # Cash after all sells
 
-            if ticker not in all_price_data or current_date not in all_price_data[ticker].index:
-                continue
+                # Calculate total positive sentiment score for weighting
+                total_positive_sentiment_score = sum(item['score'] for item in buy_targets if item['score'] > 0)
 
-            execution_price = all_price_data[ticker].loc[current_date, 'Open']
-            if pd.isna(execution_price):
-                continue
+                if total_positive_sentiment_score > 0:
+                    print(f"Allocating based on score weights. Total positive score: {total_positive_sentiment_score:.2f}. Cash to allocate: ${cash_to_allocate:,.2f}")
+                    for item in buy_targets:
+                        ticker = item['ticker']
+                        score = item['score']
+                        if score > 0:
+                            weight = score / total_positive_sentiment_score
+                            capital_allocations[ticker] = cash_to_allocate * weight
+                        else:
+                            # Assign zero capital if score is not positive, even if it met BUY_THRESHOLD (e.g. BUY_THRESHOLD <= 0)
+                            capital_allocations[ticker] = 0.0
+                else: # Fallback: Equal weight if no positive scores or no buy_targets (though covered by outer 'if buy_targets')
+                    print("Total positive sentiment score is not > 0. Falling back to equal weight allocation.")
+                    num_buys = len(buy_targets)
+                    if num_buys > 0:
+                        equal_capital_per_buy = cash_to_allocate / num_buys
+                        for item in buy_targets:
+                            ticker = item['ticker']
+                            capital_allocations[ticker] = equal_capital_per_buy
 
-            if action == 'buy' and positions[ticker]['shares'] == 0:
-                if portfolio['cash'] > 0:
-                    shares_to_buy_approx = capital_per_buy / execution_price
-                    shares_to_buy = int(shares_to_buy_approx)
-                    cost = shares_to_buy * execution_price
-                    if shares_to_buy > 0 and portfolio['cash'] >= cost:
-                        trades_executed.append({
-                            'Date': current_date.strftime('%Y-%m-%d'),
-                            'Ticker': ticker,
-                            'Action': 'Buy',
-                            'Price': execution_price,
-                            'Shares': shares_to_buy,
-                            'SentimentScoreAtTrade': triggering_score,
-                            'PortfolioCashBeforeTrade': portfolio['cash'],
-                            'PortfolioValueBeforeTrade': portfolio['total_value']
-                        })
-                        positions[ticker]['shares'] += shares_to_buy
-                        portfolio['cash'] -= cost
-                        print(f"{current_date.strftime('%Y-%m-%d')}: BOUGHT {shares_to_buy} {ticker} @ ${execution_price:.2f}, Cost: ${cost:.2f}, Sentiment: {triggering_score:.2f}")
+            if capital_allocations:
+                print("Planned capital allocations:")
+                for t, cap in capital_allocations.items():
+                    print(f"  {t}: ${cap:,.2f}")
 
-            elif action == 'sell' and positions[ticker]['shares'] > 0:
-                shares_to_sell = positions[ticker]['shares']
-                proceeds = shares_to_sell * execution_price
+            # Execute trades based on calculated allocations
+            for target_item in buy_targets: # Iterate buy_targets to easily get original score for logging
+                ticker = target_item['ticker']
+                original_score = target_item['score'] # Score used for BUY_THRESHOLD and weighting
 
-                trades_executed.append({
-                    'Date': current_date.strftime('%Y-%m-%d'),
-                    'Ticker': ticker,
-                    'Action': 'Sell',
-                    'Price': execution_price,
-                    'Shares': shares_to_sell,
-                    'SentimentScoreAtTrade': triggering_score,
-                    'PortfolioCashBeforeTrade': portfolio['cash'],
-                    'PortfolioValueBeforeTrade': portfolio['total_value']
-                })
-                positions[ticker]['shares'] = 0
-                portfolio['cash'] += proceeds
-                print(f"{current_date.strftime('%Y-%m-%d')}: SOLD {shares_to_sell} {ticker} @ ${execution_price:.2f}, Proceeds: ${proceeds:.2f}, Sentiment: {triggering_score:.2f}")
+                allocated_capital = capital_allocations.get(ticker)
+                if allocated_capital is None or allocated_capital <= 1.0: # Check for None and skip if capital is negligible (e.g. $1)
+                    print(f"Skipping buy for {ticker}: No capital allocated or allocation too small (${allocated_capital:.2f}).")
+                    continue
+
+                if ticker not in all_price_data or current_date not in all_price_data[ticker].index:
+                    print(f"Skipping buy for {ticker}: No price data available for {current_date.strftime('%Y-%m-%d')}")
+                    continue
+
+                execution_price = all_price_data[ticker].loc[current_date, 'Open']
+                if pd.isna(execution_price) or execution_price <= 0:
+                    print(f"Skipping buy for {ticker}: Invalid execution price ${execution_price} on {current_date.strftime('%Y-%m-%d')}")
+                    continue
+
+                # Check if there's any cash left in the portfolio at all before attempting the trade
+                if portfolio['cash'] <= 1.0: # If practically no cash left
+                    print(f"Skipping buy for {ticker}: Insufficient total cash (${portfolio['cash']:.2f}) left in portfolio.")
+                    continue
+
+                shares_to_buy_approx = allocated_capital / execution_price
+                shares_to_buy = int(shares_to_buy_approx)
+                cost = shares_to_buy * execution_price
+
+                if shares_to_buy > 0 and portfolio['cash'] >= cost :
+                    trades_executed.append({
+                        'Date': current_date.strftime('%Y-%m-%d'),
+                        'Ticker': ticker,
+                        'Action': 'Buy (Quarterly Rebalance)',
+                        'Price': execution_price,
+                        'Shares': shares_to_buy,
+                        'SentimentScoreAtTrade': original_score, # Log the score that triggered the buy
+                        'PortfolioCashBeforeTrade': portfolio['cash'],
+                        'PortfolioValueBeforeTrade': portfolio['total_value']
+                    })
+                    positions[ticker]['shares'] += shares_to_buy
+                    positions[ticker]['execution_price'] = execution_price
+                    portfolio['cash'] -= cost
+                    print(f"{current_date.strftime('%Y-%m-%d')}: BOUGHT (Q Rebalance) {shares_to_buy} {ticker} @ ${execution_price:.2f}, Cost: ${cost:.2f}, Allocated Cap: ${allocated_capital:,.2f}, Sentiment: {original_score:.2f}")
+                else:
+                    print(f"Could not buy {ticker}: Shares_to_buy={shares_to_buy}, Current Cash=${portfolio['cash']:.2f}, Cost=${cost:.2f}, Allocated Cap: ${allocated_capital:,.2f}")
+
+            # --- Log Portfolio Composition After Rebalancing ---
+            # First, update position values based on execution prices for newly bought assets
+            current_holdings_value_at_rebalance = 0
+            for ticker_p, pos_data_p in positions.items():
+                if pos_data_p['shares'] > 0:
+                    # For newly bought positions, value is shares * execution_price
+                    # This ensures the logged 'MarketValue' for stocks is based on rebalance day's buy prices.
+                    positions[ticker_p]['value'] = pos_data_p['shares'] * pos_data_p['execution_price']
+                    current_holdings_value_at_rebalance += positions[ticker_p]['value']
+
+            final_cash_after_rebalance = portfolio['cash']
+            total_portfolio_value_after_rebalance = final_cash_after_rebalance + current_holdings_value_at_rebalance
+
+            # Log stock positions
+            for ticker_log, pos_details_log in positions.items():
+                if pos_details_log['shares'] > 0:
+                    market_value = pos_details_log['shares'] * pos_details_log['execution_price']
+                    weight = market_value / total_portfolio_value_after_rebalance if total_portfolio_value_after_rebalance else 0
+                    quarterly_portfolio_log.append({
+                        'RebalanceDate': current_date.strftime('%Y-%m-%d'),
+                        'AssetType': 'Stock',
+                        'Ticker': ticker_log,
+                        'Shares': pos_details_log['shares'],
+                        'PriceAtRebalance': pos_details_log['execution_price'],
+                        'MarketValue': market_value,
+                        'WeightInPortfolio': weight,
+                        'CashAfterRebalance': final_cash_after_rebalance,
+                        'TotalPortfolioValueAfterRebalance': total_portfolio_value_after_rebalance
+                    })
+
+            # Log cash position
+            cash_weight = final_cash_after_rebalance / total_portfolio_value_after_rebalance if total_portfolio_value_after_rebalance else 0
+            quarterly_portfolio_log.append({
+                'RebalanceDate': current_date.strftime('%Y-%m-%d'),
+                'AssetType': 'Cash',
+                'Ticker': 'CASH',
+                'Shares': final_cash_after_rebalance, # Using cash value as 'Shares' for cash type
+                'PriceAtRebalance': 1.0, # Price for cash is 1
+                'MarketValue': final_cash_after_rebalance,
+                'WeightInPortfolio': cash_weight,
+                'CashAfterRebalance': final_cash_after_rebalance,
+                'TotalPortfolioValueAfterRebalance': total_portfolio_value_after_rebalance
+            })
+            print(f"Logged portfolio composition for {current_date.strftime('%Y-%m-%d')}. Holdings: {current_holdings_value_at_rebalance:.2f}, Cash: {final_cash_after_rebalance:.2f}, Total: {total_portfolio_value_after_rebalance:.2f}")
+
 
         # --- Daily Portfolio Valuation (Mark-to-Market) ---
+        # This runs every day, regardless of rebalancing.
+        # For MTM, we use daily closing prices.
         current_holdings_value = 0
         for ticker, pos_data in positions.items():
             if pos_data['shares'] > 0:
@@ -266,19 +385,25 @@ def main():
                     close_price = all_price_data[ticker].loc[current_date, 'Close']
                     if not pd.isna(close_price):
                         positions[ticker]['value'] = pos_data['shares'] * close_price
-                        current_holdings_value += positions[ticker]['value']
-                    else: # If close price is NaN, use last known value for this ticker (carry forward)
-                        current_holdings_value += positions[ticker]['value']
-                else: # If no price data for today, carry forward last known value
-                     current_holdings_value += positions[ticker]['value']
+                # If close price is NaN, or if ticker/date not in price_data,
+                # the value from the previous day (already in positions[ticker]['value']) is carried forward.
+                # So, no specific 'else' needed here to handle missing price,
+                # as long as positions[ticker]['value'] is not reset before this.
+            # Add the ticker's value (either updated or carried over) to current_holdings_value
+            current_holdings_value += positions[ticker]['value']
 
         portfolio['holdings_value'] = current_holdings_value
         portfolio['total_value'] = portfolio['cash'] + portfolio['holdings_value']
-        portfolio_history.loc[current_date, 'total_value'] = portfolio['total_value']
 
-    # Fill NaNs in portfolio_history (e.g., non-trading days if not using 'B' freq)
+    if current_date in portfolio_history.index:
+         portfolio_history.loc[current_date, 'total_value'] = portfolio['total_value']
+
+# Fill NaNs in portfolio_history (e.g., from weekends if original range included them, or holidays)
+# This is important for days that might be in backtest_date_range (like holidays) but have no trades or price updates.
     portfolio_history['total_value'] = portfolio_history['total_value'].ffill()
-    portfolio_history.dropna(inplace=True) # Drop any leading NaNs if any
+# Drop any leading NaNs if backtest started before any valid price/signal data or if initial days are NaNs.
+portfolio_history.dropna(subset=['total_value'], inplace=True)
+
 
     # 5. Calculate Performance Metrics
     if portfolio_history.empty:
@@ -289,14 +414,13 @@ def main():
         for metric, value in metrics.items():
             print(f"{metric}: {value:.2%}" if isinstance(value, (int, float)) and ("Return" in metric or "Rate" in metric or "Volatility" in metric or "Drawdown" in metric) else f"{metric}: {value}")
 
-        # 6. Save Portfolio History
+    # 6. Save Results
         try:
             portfolio_history.to_csv(PORTFOLIO_PERFORMANCE_CSV)
             print(f"\nDaily portfolio performance saved to: {PORTFOLIO_PERFORMANCE_CSV}")
         except Exception as e:
             print(f"Error saving portfolio performance: {e}")
 
-        # Save Trades Log
         if trades_executed:
             trades_df = pd.DataFrame(trades_executed)
             trades_log_csv = os.path.join(OUTPUT_DIR, "trades_log.csv")
@@ -307,6 +431,17 @@ def main():
                 print(f"Error saving trades log: {e}")
         else:
             print("No trades were executed during the backtest.")
+
+    if quarterly_portfolio_log:
+        quarterly_df = pd.DataFrame(quarterly_portfolio_log)
+        try:
+            quarterly_df.to_csv(QUARTERLY_PORTFOLIO_COMPOSITION_CSV, index=False)
+            print(f"Quarterly portfolio composition saved to: {QUARTERLY_PORTFOLIO_COMPOSITION_CSV}")
+        except Exception as e:
+            print(f"Error saving quarterly portfolio composition: {e}")
+    else:
+        print("No quarterly portfolio compositions were logged.")
+
 
 if __name__ == "__main__":
     main()

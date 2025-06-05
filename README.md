@@ -45,12 +45,19 @@ The pipeline consists of the following Python scripts:
     *   **Key Outputs:** Individual CSV files for each ticker (e.g., `AAPL.csv`) in the `price_data/` directory.
 
 *   **`backtest_strategy.py`**
-    *   **Purpose:** Simulates a trading strategy based on the generated sentiment signals and historical price data.
-    *   **Key Inputs:** `processed_13f_data/sentiment_signals.csv`, price data from `price_data/`, strategy parameters (e.g., `BUY_THRESHOLD`, `SELL_THRESHOLD`, `INITIAL_CAPITAL`).
+    *   **Purpose:** Simulates a trading strategy based on the generated sentiment signals and historical price data. The strategy implements quarterly rebalancing:
+        *   Trading decisions are made on a quarterly basis, aligned with 13F reporting dates (with a configurable `SIGNAL_LAG_DAYS`).
+        *   On these rebalancing days, all existing positions in the portfolio are liquidated.
+        *   New positions are then established based on the latest quarterly sentiment signals.
+    *   **Capital Allocation:** For new buy positions, capital is allocated using a **score-weighted** approach:
+        *   Stocks with higher positive sentiment scores (those meeting the `BUY_THRESHOLD`) receive a proportionally larger share of the available cash.
+        *   If the sum of positive scores for eligible stocks is zero or negative, the allocation falls back to an equal-weight distribution among eligible stocks.
+    *   **Key Inputs:** `processed_13f_data/sentiment_signals.csv`, price data from `price_data/`, strategy parameters (e.g., `BUY_THRESHOLD`, `INITIAL_CAPITAL`, `SIGNAL_LAG_DAYS`).
     *   **Key Outputs:**
         *   Console output of performance metrics (Total Return, Sharpe Ratio, etc.).
         *   `backtest_results/portfolio_daily_performance.csv` (daily portfolio value).
         *   `backtest_results/trades_log.csv` (log of executed trades).
+        *   `backtest_results/quarterly_portfolio_composition.csv` (detailed portfolio holdings after each rebalance).
 
 *   **`rl_optimizer_concept.py`**
     *   **Purpose:** A conceptual script outlining how Reinforcement Learning could be applied to optimize parameters (like buy/sell thresholds) of the `backtest_strategy.py`.
@@ -196,14 +203,18 @@ Execute the scripts in the following order:
     *   **Columns:** `Date`, `Ticker`, `Action` (Buy/Sell), `Price`, `Shares`, `SentimentScoreAtTrade`, `PortfolioCashBeforeTrade`, `PortfolioValueBeforeTrade`.
     *   **Purpose:** Records details of each simulated trade executed by the backtester.
 
+*   **`backtest_results/quarterly_portfolio_composition.csv`**:
+    *   **Columns:** `RebalanceDate`, `AssetType` (Stock/Cash), `Ticker`, `Shares`, `PriceAtRebalance`, `MarketValue`, `WeightInPortfolio`, `CashAfterRebalance`, `TotalPortfolioValueAfterRebalance`.
+    *   **Purpose:** Logs the detailed composition of the portfolio (all stock holdings and cash) immediately after each quarterly rebalancing event, including weights and values at the time of rebalancing.
+
 ## Example Iteration
 
 During development, an example iteration involved:
 1.  Simulating 3 quarters of 13F data for Berkshire Hathaway (CIK `0001067983`).
 2.  Processing this data through the pipeline. `sentiment_signals.csv` showed dynamic scores for stocks like AAPL, AXP, BAC. For example, AXP had a sentiment score of ~0.086 for 2023-12-31, while AAPL had ~0.051.
-3.  Running `backtest_strategy.py` with `BUY_THRESHOLD = 0.05`. This resulted in a "Buy" trade for AAPL (score ~0.051) and AXP (score ~0.086). Due to the capital allocation logic (dividing cash by number of buy signals), if multiple stocks are bought, the capital is split.
+3.  Running `backtest_strategy.py` with `BUY_THRESHOLD = 0.05`. This resulted in "Buy" trades for AAPL (score ~0.051) and AXP (score ~0.086). Capital was allocated based on their relative scores (AXP receiving more due to its higher score).
 4.  Changing `BUY_THRESHOLD` to `0.07`.
-5.  Re-running `backtest_strategy.py`. This time, only AXP (score ~0.086) was bought, as AAPL's score (~0.051) no longer met the more stringent threshold. This demonstrated how parameter changes directly impact strategy behavior and performance outcomes.
+5.  Re-running `backtest_strategy.py`. This time, only AXP (score ~0.086) was bought, as AAPL's score (~0.051) no longer met the more stringent threshold. AXP would receive 100% of the cash allocated for buys in this scenario. This demonstrated how parameter changes directly impact strategy behavior and performance outcomes.
 
 ## Known Limitations
 
@@ -211,7 +222,7 @@ During development, an example iteration involved:
 *   **Basic Sentiment Model:** The current sentiment score is based on simple changes in reported holdings (value, shares, number of investors). It does not incorporate more nuanced factors like the type of investor, concentration, or NLP on filing text.
 *   **Backtester Simplifications:**
     *   No transaction costs (brokerage fees) or market slippage are modeled.
-    *   Capital allocation is basic (divides available cash among current buy signals). It does not implement sophisticated portfolio construction or rebalancing rules.
+    *   Capital allocation is score-weighted based on sentiment signals. While more advanced than simple equal division, further refinements (e.g., risk parity, maximum position size constraints) are not yet implemented.
     *   Assumes trades execute at the next day's Open price based on signals active from the prior day's effective date (controlled by `SIGNAL_LAG_DAYS`).
 *   **CUSIP-to-Ticker Mapping:** Relies on a manual, hardcoded dictionary. This is not scalable and requires constant updates for new CUSIPs. A dedicated mapping API or database would be needed for broader coverage.
 *   **Simulated Data for Demo:** Due to scraping challenges during development, the final demonstrations used a manually curated set of simulated 13F data to ensure the pipeline's functionality could be tested end-to-end.
